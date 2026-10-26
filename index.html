@@ -180,11 +180,11 @@ $("start").onclick=function(){
   $("err").textContent="";
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){$("err").textContent="Microphone is not available in this browser or context.";return}
   navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}}).then(function(s){
-    stream=s;ctx=new (window.AudioContext||window.webkitAudioContext)();
+    stream=s;ctx=new (window.AudioContext||window.webkitAudioContext)();if(ctx.resume)ctx.resume();
     var src=ctx.createMediaStreamSource(s);an=ctx.createAnalyser();an.fftSize=4096;an.smoothingTimeConstant=0;
     buf=new Float32Array(an.fftSize);src.connect(an);
     running=true;$("start").textContent="Stop";reset();tick();
-  }).catch(function(){$("err").textContent="Microphone access was blocked. Allow it in your browser settings and try again."});
+  }).catch(function(e){var nm=e&&e.name||"Error";$("err").textContent=nm==="NotFoundError"?"No microphone found.":nm==="NotAllowedError"||nm==="SecurityError"?"Microphone blocked ("+nm+"). Allow it in the browser/site settings, or open this page directly rather than embedded.":"Microphone error: "+nm;});
 };
 function stop(){
   cancelAnimationFrame(raf);if(stream)stream.getTracks().forEach(function(t){t.stop()});
