@@ -98,6 +98,7 @@ $("auto").onclick=function(){auto=!auto;if(auto)locked=-1;hist=[];updMode();buil
 function updMode(){$("auto").className=auto?"on":"";$("lockTxt").textContent=auto?"Auto-detect string":"Locked to string (tap Auto to release)"}
 
 function reset(){
+  hasSig=false;target=0;
   $("note").textContent="–";$("hz").textContent="– Hz";$("ct").textContent="– ¢";
   $("hint").className="hint";$("hint").textContent=running?"Play a string":"Tap start and play a string";
   $("meter").className="meter";
@@ -124,11 +125,23 @@ function nearest(f){
 }
 function median(a){var s=a.slice().sort(function(x,y){return x-y});return s[s.length>>1]}
 
+var lastDet=0,target=0,pos=0,lastT=0,lastTxt=0;
+function animate(now){
+  var dt=Math.min(0.05,(now-(lastT||now))/1000);lastT=now;
+  pos+=(target-pos)*(1-Math.exp(-dt/0.14));
+  var d=Math.max(-50,Math.min(50,pos));
+  $("needle").setAttribute("transform","rotate("+(d/50*SW)+" 150 150)");
+  if(now-lastTxt>120&&hasSig){lastTxt=now;$("ct").textContent=(pos>0.5?"+":"")+Math.round(pos)+" ¢";$("hz").textContent=curF.toFixed(1)+" Hz"}
+}
 function tick(){
   raf=requestAnimationFrame(tick);
+  var now=performance.now();
+  animate(now);
+  if(now-lastDet<40)return;
+  lastDet=now;
   an.getFloatTimeDomainData(buf);
   var sum=0;for(var i=0;i<buf.length;i++)sum+=buf[i]*buf[i];
-  var rms=Math.sqrt(sum/buf.length),now=performance.now();
+  var rms=Math.sqrt(sum/buf.length);
   var attack=rms>0.015&&rms>prevRms*2.2;prevRms=prevRms*0.8+rms*0.2;
   if(rms>0.008){
     var f=yin(buf,ctx.sampleRate);
@@ -142,23 +155,23 @@ function tick(){
       if(locked>=0)render(f);
     }
   }else if(now-lastSig>1500){
+    target=0;cents=[];
     if(auto&&locked>=0){locked=-1;hist=[];buildUI();reset()}
   }
 }
-var cents=[];
+var cents=[],lastLk=-1,inTune=false,curF=0,hasSig=false;
 function render(f){
   var n=INST[cur][locked],c=1200*Math.log(f/n[2])/Math.LN2;
+  if(locked!==lastLk){cents=[];lastLk=locked;inTune=false}
   c=Math.max(-100,Math.min(100,c));
-  cents.push(c);if(cents.length>5)cents.shift();
-  var m=median(cents);smooth+=(m-smooth)*0.35;
-  var disp=Math.max(-50,Math.min(50,smooth));
-  $("needle").setAttribute("transform","rotate("+(disp/50*SW)+" 150 150)");
-  $("note").innerHTML=n[0]+"<sub>"+n[1]+"</sub>";
-  $("hz").textContent=f.toFixed(1)+" Hz";
-  $("ct").textContent=(smooth>0?"+":"")+smooth.toFixed(0)+" ¢";
-  var a=Math.abs(smooth),h=$("hint"),mt=$("meter");
-  if(a<=5){h.className="hint ok";h.textContent="In tune ✓";mt.className="meter ok";done[cur+locked]=1;mark()}
-  else{mt.className="meter";h.className="hint "+(a<15?"warn":"bad");h.textContent=smooth<0?"Too low – tighten ↑":"Too high – loosen ↓"}
+  cents.push(c);if(cents.length>9)cents.shift();
+  var m=median(cents);
+  if(!hasSig||Math.abs(m-target)>2)target=m;
+  curF=f;hasSig=true;
+  var nt=n[0]+"<sub>"+n[1]+"</sub>";if($("note").innerHTML!==nt)$("note").innerHTML=nt;
+  var a=Math.abs(m),h=$("hint"),mt=$("meter");
+  if(a<=(inTune?8:5)){inTune=true;h.className="hint ok";h.textContent="In tune ✓";mt.className="meter ok";done[cur+locked]=1;mark()}
+  else{inTune=false;mt.className="meter";h.className="hint "+(a<15?"warn":"bad");h.textContent=m<0?"Too low – tighten ↑":"Too high – loosen ↓"}
 }
 function mark(){var b=$("strings").children[locked];if(b&&!b.classList.contains("done"))b.classList.add("done")}
 
