@@ -35,7 +35,6 @@ svg{width:100%;height:auto;display:block}
 .row button{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:999px;padding:7px 14px;font:600 13px inherit;font-family:inherit;cursor:pointer}
 .row button.on{background:var(--fg);color:var(--bg)}
 #start{border:0;background:var(--fg);color:var(--bg);font:700 17px inherit;font-family:inherit;padding:16px;border-radius:14px;cursor:pointer}
-.lvl{height:4px;border-radius:2px;background:var(--line);margin:12px 14px 0;overflow:hidden}.lvl i{display:block;height:100%;width:0;background:var(--mute)}
 #err{color:var(--bad);font-size:14px;text-align:center;min-height:0}
 </style>
 </head>
@@ -54,7 +53,6 @@ svg{width:100%;height:auto;display:block}
     <div class="note" id="note">–</div>
     <div class="hint" id="hint">Tap start and play a string</div>
     <div class="info"><span id="hz">– Hz</span><span id="ct">– ¢</span></div>
-    <div class="lvl" title="Mic level"><i id="lvl"></i></div>
   </div>
   <div class="strings" id="strings"></div>
   <div class="row">
@@ -100,7 +98,6 @@ $("auto").onclick=function(){auto=!auto;if(auto)locked=-1;hist=[];updMode();buil
 function updMode(){$("auto").className=auto?"on":"";$("lockTxt").textContent=auto?"Auto-detect string":"Locked to string (tap Auto to release)"}
 
 function reset(){
-  hasSig=false;target=0;
   $("note").textContent="–";$("hz").textContent="– Hz";$("ct").textContent="– ¢";
   $("hint").className="hint";$("hint").textContent=running?"Play a string":"Tap start and play a string";
   $("meter").className="meter";
@@ -127,25 +124,13 @@ function nearest(f){
 }
 function median(a){var s=a.slice().sort(function(x,y){return x-y});return s[s.length>>1]}
 
-var lastDet=0,target=0,pos=0,lastT=0,lastTxt=0;
-function animate(now){
-  var dt=Math.min(0.05,(now-(lastT||now))/1000);lastT=now;
-  pos+=(target-pos)*(1-Math.exp(-dt/0.14));
-  var d=Math.max(-50,Math.min(50,pos));
-  $("needle").setAttribute("transform","rotate("+(d/50*SW)+" 150 150)");
-  if(now-lastTxt>120&&hasSig){lastTxt=now;$("ct").textContent=(pos>0.5?"+":"")+Math.round(pos)+" ¢";$("hz").textContent=curF.toFixed(1)+" Hz"}
-}
 function tick(){
   raf=requestAnimationFrame(tick);
-  var now=performance.now();
-  animate(now);
-  if(now-lastDet<40)return;
-  lastDet=now;
   an.getFloatTimeDomainData(buf);
   var sum=0;for(var i=0;i<buf.length;i++)sum+=buf[i]*buf[i];
-  var rms=Math.sqrt(sum/buf.length);$("lvl").style.width=Math.min(100,rms*500)+"%";
+  var rms=Math.sqrt(sum/buf.length),now=performance.now();
   var attack=rms>0.015&&rms>prevRms*2.2;prevRms=prevRms*0.8+rms*0.2;
-  if(rms>0.004){
+  if(rms>0.008){
     var f=yin(buf,ctx.sampleRate);
     if(f&&f>50&&f<1200){
       lastSig=now;
@@ -157,23 +142,23 @@ function tick(){
       if(locked>=0)render(f);
     }
   }else if(now-lastSig>1500){
-    target=0;cents=[];
     if(auto&&locked>=0){locked=-1;hist=[];buildUI();reset()}
   }
 }
-var cents=[],lastLk=-1,inTune=false,curF=0,hasSig=false;
+var cents=[];
 function render(f){
   var n=INST[cur][locked],c=1200*Math.log(f/n[2])/Math.LN2;
-  if(locked!==lastLk){cents=[];lastLk=locked;inTune=false}
   c=Math.max(-100,Math.min(100,c));
-  cents.push(c);if(cents.length>9)cents.shift();
-  var m=median(cents);
-  if(!hasSig||Math.abs(m-target)>2)target=m;
-  curF=f;hasSig=true;
-  var nt=n[0]+"<sub>"+n[1]+"</sub>";if($("note").innerHTML!==nt)$("note").innerHTML=nt;
-  var a=Math.abs(m),h=$("hint"),mt=$("meter");
-  if(a<=(inTune?8:5)){inTune=true;h.className="hint ok";h.textContent="In tune ✓";mt.className="meter ok";done[cur+locked]=1;mark()}
-  else{inTune=false;mt.className="meter";h.className="hint "+(a<15?"warn":"bad");h.textContent=m<0?"Too low – tighten ↑":"Too high – loosen ↓"}
+  cents.push(c);if(cents.length>5)cents.shift();
+  var m=median(cents);smooth+=(m-smooth)*0.35;
+  var disp=Math.max(-50,Math.min(50,smooth));
+  $("needle").setAttribute("transform","rotate("+(disp/50*SW)+" 150 150)");
+  $("note").innerHTML=n[0]+"<sub>"+n[1]+"</sub>";
+  $("hz").textContent=f.toFixed(1)+" Hz";
+  $("ct").textContent=(smooth>0?"+":"")+smooth.toFixed(0)+" ¢";
+  var a=Math.abs(smooth),h=$("hint"),mt=$("meter");
+  if(a<=5){h.className="hint ok";h.textContent="In tune ✓";mt.className="meter ok";done[cur+locked]=1;mark()}
+  else{mt.className="meter";h.className="hint "+(a<15?"warn":"bad");h.textContent=smooth<0?"Too low – tighten ↑":"Too high – loosen ↓"}
 }
 function mark(){var b=$("strings").children[locked];if(b&&!b.classList.contains("done"))b.classList.add("done")}
 
@@ -181,12 +166,12 @@ $("start").onclick=function(){
   if(running){stop();return}
   $("err").textContent="";
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){$("err").textContent="Microphone is not available in this browser or context.";return}
-  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true}}).then(function(s){
-    stream=s;ctx=new (window.AudioContext||window.webkitAudioContext)();if(ctx.resume)ctx.resume();
+  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}}).then(function(s){
+    stream=s;ctx=new (window.AudioContext||window.webkitAudioContext)();
     var src=ctx.createMediaStreamSource(s);an=ctx.createAnalyser();an.fftSize=4096;an.smoothingTimeConstant=0;
     buf=new Float32Array(an.fftSize);src.connect(an);
     running=true;$("start").textContent="Stop";reset();tick();
-  }).catch(function(e){var nm=e&&e.name||"Error";$("err").textContent=nm==="NotFoundError"?"No microphone found.":nm==="NotAllowedError"||nm==="SecurityError"?"Microphone blocked ("+nm+"). Allow it in the browser/site settings, or open this page directly rather than embedded.":"Microphone error: "+nm;});
+  }).catch(function(){$("err").textContent="Microphone access was blocked. Allow it in your browser settings and try again."});
 };
 function stop(){
   cancelAnimationFrame(raf);if(stream)stream.getTracks().forEach(function(t){t.stop()});
